@@ -1,0 +1,7 @@
+faiss-cpu
+numpy
+gradio
+transformers
+sentence-transformers
+scikit-learn
+torch
