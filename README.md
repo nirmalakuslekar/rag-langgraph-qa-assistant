@@ -6,12 +6,14 @@ RAG-powered LangGraph QA Assistant using embeddings and LLM
 
 This project is a **Retrieval-Augmented Generation (RAG)** powered AI assistant that answers questions based on a text file (`sample.txt`) using embeddings and a large language model (LLM).
 
-## Features
-- Uses **FAISS** for vector search on text chunks.
-- Integrates **Sentence Transformers** for embeddings.
-- Uses **FLAN-T5** as the LLM for question answering.
-- Provides a **Gradio web interface** for interactive QA.
-- Example questions included in sidebar for quick testing.
+
+- **RAG Architecture**: Combines vector similarity search with a local LLM for grounded responses.
+- **Embedding Search**: Uses `sentence-transformers/all-MiniLM-L6-v2` to retrieve semantically similar text chunks.
+- **Contextual Answering**: Generates responses based only on retrieved context (prevents hallucinations).
+- **Memory Simulation**: Maintains ongoing chat history to simulate conversational memory.
+- **Interactive Chat UI**: Built using `Gradio` for an intuitive, ChatGPT-style interface.
+- **FAISS Vector Index**: Efficient similarity search for retrieval.
+- **Prompt Engineering**: Strong system prompt for clarity and accuracy.
 
 ## Setup Instructions
 
