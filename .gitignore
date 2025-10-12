@@ -1,0 +1,32 @@
+# Python cache and virtual environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+env/
+venv/
+*.egg-info/
+*.egg
+
+# FAISS and model files
+*.bin
+*.pt
+*.pkl
+*.npy
+
+# IDE/project files
+.vscode/
+.idea/
+.DS_Store
+
+# Logs and local files
+*.log
+logs/
+outputs/
+checkpoints/
+
+# Gradio local data
+gradio_cached_examples/
+gradio_cache/
