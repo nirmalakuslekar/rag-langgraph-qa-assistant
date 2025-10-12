@@ -2,48 +2,50 @@ import os
 import faiss
 import numpy as np
 import gradio as gr
+from dotenv import load_dotenv
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from sentence_transformers import SentenceTransformer
 from sklearn.preprocessing import normalize
+from sklearn.metrics.pairwise import cosine_similarity
 
 # -----------------------------
-# Config
+# Environment + Config
 # -----------------------------
+load_dotenv()
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH = os.path.join(BASE_DIR, "sample.txt")
-INDEX_PATH = os.path.join(BASE_DIR, "faiss_index.bin")
-# DATA_PATH = "sample.txt"
-# INDEX_PATH = "faiss_index.bin"
-EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL_NAME = "google/flan-t5-small"
-EMBED_DIM = 384
-TOP_K = 5
-CHUNK_SIZE = 500
+DATA_PATH = os.getenv("DATA_PATH", os.path.join(BASE_DIR, "sample.txt"))
+INDEX_PATH = os.getenv("INDEX_PATH", os.path.join(BASE_DIR, "faiss_index.bin"))
+EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "google/flan-t5-small")
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 500))
+TOP_K = int(os.getenv("TOP_K", 5))
+OVERLAP = int(os.getenv("OVERLAP", 100))
 
 # -----------------------------
-# Load embeddings + FAISS index
+# Load Embeddings + FAISS Index
 # -----------------------------
 embedder = SentenceTransformer(EMBED_MODEL_NAME)
 
-def chunk_text(text, size=CHUNK_SIZE):
+def chunk_text(text, size=CHUNK_SIZE, overlap=OVERLAP):
+    """Split text into overlapping chunks for better context retention."""
     paragraphs = text.split("\n\n")
     chunks = []
     for para in paragraphs:
         para = para.strip()
         if not para:
             continue
-        while len(para) > size:
-            chunk = para[:size]
-            para = para[size:]
-            chunks.append(chunk)
-        if para:
-            chunks.append(para)
+        start = 0
+        while start < len(para):
+            end = min(len(para), start + size)
+            chunks.append(para[start:end])
+            start += size - overlap
     return chunks
 
 def load_documents(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         text = f.read()
-    return chunk_text(text, CHUNK_SIZE)
+    return chunk_text(text, CHUNK_SIZE, OVERLAP)
 
 docs = load_documents(DATA_PATH)
 
@@ -72,16 +74,31 @@ tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL_NAME)
 model = AutoModelForSeq2SeqLM.from_pretrained(LLM_MODEL_NAME)
 
 # -----------------------------
-# Strong prompt
+# Prompt
 # -----------------------------
 STRONG_SYSTEM_INSTRUCTION = (
     "You are a highly knowledgeable AI assistant. "
     "Answer the user's question using ONLY the provided CONTEXT. "
     "Do NOT hallucinate. "
     "If the context does not contain a direct answer, respond: 'I don't know based on the provided context.' "
-    "Answer in a clear, detailed, and professional manner without including chunk numbers."
+    "Answer in a clear, detailed, and professional manner."
 )
 
+# -----------------------------
+# Memory & Evaluation
+# -----------------------------
+chat_memory = []
+
+def evaluate_retrieval_quality(question, context):
+    """Calculate cosine similarity between query and retrieved context."""
+    q_vec = embedder.encode([question])
+    c_vec = embedder.encode([context])
+    score = cosine_similarity(q_vec, c_vec)[0][0]
+    return round(float(score), 4)
+
+# -----------------------------
+# Answer Generation
+# -----------------------------
 def generate_answer(question, top_k=TOP_K, max_new_tokens=300):
     try:
         q_vec = np.array([embedder.encode(question)], dtype="float32")
@@ -89,9 +106,13 @@ def generate_answer(question, top_k=TOP_K, max_new_tokens=300):
         D, I = index.search(q_vec, k=min(top_k, len(docs)))
 
         context = "\n\n".join([docs[int(idx)] for idx in I[0] if idx < len(docs)])
+        retrieval_score = evaluate_retrieval_quality(question, context)
+
+        conversation_context = " ".join([f"User: {q}\nAI: {a}" for q, a in chat_memory[-3:]])
 
         prompt = (
             STRONG_SYSTEM_INSTRUCTION + "\n\n"
+            f"PREVIOUS CONVERSATION:\n{conversation_context}\n\n"
             f"CONTEXT:\n{context}\n\n"
             f"QUESTION: {question}\n\n"
             "Answer now:"
@@ -105,7 +126,10 @@ def generate_answer(question, top_k=TOP_K, max_new_tokens=300):
             early_stopping=True,
             no_repeat_ngram_size=3
         )
-        return tokenizer.decode(outputs[0], skip_special_tokens=True)
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        chat_memory.append((question, answer))
+        print(f"🔍 Retrieval similarity score: {retrieval_score}")
+        return f"{answer}\n\n🧭 Retrieval Similarity Score: {retrieval_score}"
     except Exception as e:
         return f"⚠️ Error generating answer: {e}"
 
@@ -121,7 +145,7 @@ def chat_stream(user_message, chat_history):
     yield chat_history, chat_history, ""
 
 # -----------------------------
-# Sidebar questions
+# Sidebar Questions
 # -----------------------------
 SIDEBAR_QUESTIONS = """
 **💡 Example Questions (copy & paste to ask):**
@@ -145,6 +169,9 @@ SIDEBAR_QUESTIONS = """
 - What are some applications of trees?
 """
 
+# -----------------------------
+# Gradio Interface
+# -----------------------------
 with gr.Blocks(title="RAG-Powered LangGraph QA Assistant") as demo:
     with gr.Row():
         with gr.Column(scale=3):
@@ -162,5 +189,4 @@ with gr.Blocks(title="RAG-Powered LangGraph QA Assistant") as demo:
         with gr.Column(scale=1):
             gr.Markdown(SIDEBAR_QUESTIONS)
 
-demo.launch()
-
+demo.launch(share=False)
